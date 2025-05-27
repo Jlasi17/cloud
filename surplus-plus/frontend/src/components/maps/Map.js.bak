@@ -1,0 +1,260 @@
+import { GoogleMap, LoadScript, Marker, InfoWindow } from '@react-google-maps/api';
+import { GOOGLE_MAPS_API_KEY, DEFAULT_MAP_CENTER, DEFAULT_ZOOM, MAP_CONTAINER_STYLE } from '../../config/config';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import CircularProgress from '@mui/material/CircularProgress'
+
+// Use the MAP_CONTAINER_STYLE from config
+const containerStyle = MAP_CONTAINER_STYLE;
+
+const Map = ({
+  center = DEFAULT_MAP_CENTER,
+  zoom = DEFAULT_ZOOM,
+  markers = [],
+  directions = null,
+  onMapClick,
+  onMarkerClick,
+  onDirectionsChanged,
+  onDistanceDurationUpdate,
+  selectedMarker,
+  children,
+  style = {},
+  options = {},
+  showDirections = false,
+  origin = null,
+  destination = null,
+  travelMode = TRAVEL_MODES.DRIVING,
+  ...rest
+}) => {
+  const [map, setMap] = useState(null);
+  const [directionsResult, setDirectionsResult] = useState(null);
+  const [distance, setDistance] = useState(null);
+  const [duration, setDuration] = useState(null);
+  const [isDirectionsLoading, setIsDirectionsLoading] = useState(false);
+  const [directionsError, setDirectionsError] = useState(null);
+  const directionsService = useRef(null);
+  const distanceMatrixService = useRef(null);
+  
+  // Add missing DirectionsRenderer to the imports if not already present
+
+  // Initialize services when map loads
+  const onLoad = useCallback((map) => {
+    setMap(map);
+    if (window.google && window.google.maps) {
+      directionsService.current = new window.google.maps.DirectionsService();
+      distanceMatrixService.current = new window.google.maps.DistanceMatrixService();
+    }
+  }, []);
+
+  const onUnmount = useCallback(() => {
+    setMap(null);
+  }, []);
+
+  // Calculate directions when origin or destination changes
+  useEffect(() => {
+    if (showDirections && origin && destination && map) {
+      calculateDirections(origin, destination, travelMode);
+    } else {
+      setDirectionsResult(null);
+    }
+  }, [origin, destination, travelMode, showDirections]);
+
+  const calculateDirections = (origin, destination, mode) => {
+    if (!origin || !destination) return;
+
+    setIsDirectionsLoading(true);
+    setDirectionsError(null);
+
+    directionsService.current.route(
+      {
+        origin,
+        destination,
+        travelMode: mode,
+        provideRouteAlternatives: true,
+      },
+      (result, status) => {
+        setIsDirectionsLoading(false);
+        if (status === 'OK') {
+          setDirectionsResult(result);
+          
+          // Calculate distance and duration
+          if (result.routes?.[0]?.legs?.[0]) {
+            const { distance, duration } = result.routes[0].legs[0];
+            setDistance(distance);
+            setDuration(duration);
+            
+            if (onDistanceDurationUpdate) {
+              onDistanceDurationUpdate({
+                distance: distance?.text || '',
+                duration: duration?.text || '',
+                distanceValue: distance?.value || 0,
+                durationValue: duration?.value || 0,
+              });
+            }
+          }
+          
+          if (onDirectionsChanged) {
+            onDirectionsChanged(result);
+          }
+        } else {
+          console.error(`Error fetching directions: ${status}`);
+          setDirectionsError('Could not calculate directions. Please try again.');
+        }
+      }
+    );
+  };
+
+  const handleDirectionsChanged = () => {
+    if (directionsResult && onDirectionsChanged) {
+      onDirectionsChanged(directionsResult);
+    }
+  };
+
+  // Combine default styles with any custom styles
+  const mapContainerStyle = {
+    ...MAP_CONTAINER_STYLE,
+    ...style,
+  };
+
+  // Combine default options with any custom options
+  const mapOptions = {
+    ...DEFAULT_MAP_OPTIONS,
+    ...options,
+  };
+
+  return (
+    <LoadScript
+      googleMapsApiKey={GOOGLE_MAPS_API_KEY}
+      libraries={['places']} // Add other required libraries
+    >
+      <Box position="relative" width="100%" height="100%">
+        <GoogleMap
+          mapContainerStyle={mapContainerStyle}
+          center={center}
+          zoom={zoom}
+          onLoad={onLoad}
+          onUnmount={onUnmount}
+          onClick={onMapClick}
+          options={mapOptions}
+          {...rest}
+        >
+          {/* Render markers */}
+          {markers.map((marker, index) => (
+            <Marker
+              key={index}
+              position={marker.position}
+              onClick={() => onMarkerClick && onMarkerClick(marker, index)}
+              icon={marker.icon}
+              label={marker.label}
+            >
+              {selectedMarker === index && marker.info && (
+                <InfoWindow
+                  position={marker.position}
+                  onCloseClick={() => onMarkerClick && onMarkerClick(null, null)}
+                >
+                  <div>
+                    <h4>{marker.info.title}</h4>
+                    <p>{marker.info.description}</p>
+                  </div>
+                </InfoWindow>
+              )}
+            </Marker>
+          ))}
+
+          {/* Render directions if available */}
+          {showDirections && directionsResult && (
+            <DirectionsRenderer
+              directions={directionsResult}
+              options={{
+                suppressMarkers: false,
+                polylineOptions: {
+                  strokeColor: '#1976d2',
+                  strokeWeight: 5,
+                  strokeOpacity: 0.8,
+                },
+              }}
+              onDirectionsChanged={handleDirectionsChanged}
+            />
+          )}
+
+          {children}
+        </GoogleMap>
+
+        {/* Loading overlay */}
+        {isDirectionsLoading && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255, 255, 255, 0.7)',
+              zIndex: 1000,
+            }}
+          >
+            <Box textAlign="center">
+              <CircularProgress />
+              <Typography variant="body2" color="textSecondary" mt={1}>
+                Calculating route...
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        {/* Error message */}
+        {directionsError && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              backgroundColor: 'error.main',
+              color: 'white',
+              p: 1,
+              borderRadius: 1,
+              zIndex: 1000,
+            }}
+          >
+            <Typography variant="body2">{directionsError}</Typography>
+          </Box>
+        )}
+
+        {/* Distance and duration info */}
+        {distance && duration && (
+          <Box
+            sx={{
+              position: 'absolute',
+              bottom: 20,
+              left: 10,
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              p: 1.5,
+              borderRadius: 1,
+              boxShadow: 2,
+              zIndex: 1000,
+              minWidth: '200px',
+            }}
+          >
+            <Typography variant="subtitle2" color="primary">
+              Route Information
+            </Typography>
+            <Box mt={1}>
+              <Typography variant="body2">
+                <strong>Distance:</strong> {distance.text}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Duration:</strong> {duration.text}
+              </Typography>
+            </Box>
+          </Box>
+        )}
+      </Box>
+    </LoadScript>
+  );
+};
+
+export default Map;
