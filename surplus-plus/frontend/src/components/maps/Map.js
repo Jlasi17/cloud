@@ -1,375 +1,442 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { GoogleMap, Marker, InfoWindow, DirectionsRenderer } from '@react-google-maps/api';
-import { 
-  DEFAULT_MAP_CENTER, 
-  DEFAULT_ZOOM, 
-  MAP_CONTAINER_STYLE, 
-  DEFAULT_MAP_OPTIONS, 
-  TRAVEL_MODES,
-  GOOGLE_MAPS_API_KEY
-} from '../../config/config';
-import { Box, Typography, CircularProgress } from '@mui/material';
-import useGeolocation from '../../hooks/useGeolocation';
-import GoogleMapsProvider from './GoogleMapsProvider';
+import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+import { Box, Typography, CircularProgress, Button } from '@mui/material';
 
-// Check if Google Maps is loaded
-const isGoogleMapsLoaded = () => {
-  return typeof window !== 'undefined' && window.google && window.google.maps;
+// Default configuration
+const DEFAULT_MAP_CENTER = {
+  lat: 17.3850,  // Default to Hyderabad, India
+  lng: 78.4867
 };
 
-// Use the MAP_CONTAINER_STYLE from config
-const containerStyle = MAP_CONTAINER_STYLE;
+const DEFAULT_ZOOM = 12;
 
-// Inner Map component that handles the actual map rendering
-const MapComponent = ({
-  center: propCenter = null,
-  zoom = DEFAULT_ZOOM,
-  markers = [],
-  directions = null,
-  onMapClick,
-  onMarkerClick,
-  onDirectionsChanged,
-  onDistanceDurationUpdate,
-  selectedMarker,
-  children,
-  style = {},
-  options = {},
-  showDirections = false,
-  origin = null,
-  destination = null,
-  travelMode = TRAVEL_MODES.DRIVING,
-  autoCenter = true,
-  ...rest
-}) => {
-  const { location: userLocation, error: locationError } = useGeolocation();
-  const [map, setMap] = useState(null);
-  const [directionsResult, setDirectionsResult] = useState(null);
-  const [distance, setDistance] = useState(null);
-  const [duration, setDuration] = useState(null);
-  const [isDirectionsLoading, setIsDirectionsLoading] = useState(false);
-  const [directionsError, setDirectionsError] = useState(null);
-  const [mapsLoaded, setMapsLoaded] = useState(isGoogleMapsLoaded());
-  const directionsService = useRef(null);
-  const distanceMatrixService = useRef(null);
-  
-  // Check if Google Maps is loaded
-  useEffect(() => {
-    if (isGoogleMapsLoaded()) {
-      setMapsLoaded(true);
-      return;
+const MAP_CONTAINER_STYLE = {
+  width: '100%',
+  height: '100%',
+  minHeight: '400px',
+  borderRadius: '8px',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+};
+
+const DEFAULT_MAP_OPTIONS = {
+  streetViewControl: false,
+  mapTypeControl: false,
+  fullscreenControl: true,
+  zoomControl: true,
+  styles: [
+    {
+      featureType: 'poi',
+      elementType: 'labels',
+      stylers: [{ visibility: 'off' }]
+    },
+    {
+      featureType: 'transit',
+      elementType: 'labels',
+      stylers: [{ visibility: 'off' }]
     }
+  ]
+};
 
-    // If not loaded, set up a listener for when it does load
-    const checkMapsLoaded = () => {
-      if (isGoogleMapsLoaded()) {
-        setMapsLoaded(true);
-      }
-    };
+const Map = React.forwardRef((props, ref) => {
+  const {
+    center: propCenter = null,
+    zoom = DEFAULT_ZOOM,
+    markers = [],
+    onMapClick,
+    children,
+    style = {},
+    options = {},
+    autoCenter = true,
+    enableAutoTracking = false, // New prop to enable/disable auto-tracking
+    trackingOptions = { 
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    }, // New prop for tracking options
+    ...rest
+  } = props;
 
-    // Check every 100ms if maps is loaded
-    const interval = setInterval(checkMapsLoaded, 100);
-    return () => clearInterval(interval);
-  }, []);
+  const [map, setMap] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [locationName, setLocationName] = useState('Click on map to select location');
+  const [isTracking, setIsTracking] = useState(false);
+  const [watchId, setWatchId] = useState(null);
+  const geocoder = useRef(null);
+  
+  // Load Google Maps API
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+    libraries: ['places'],
+  });
+
+  // Initialize geocoder when Google Maps is loaded
+  useEffect(() => {
+    if (isLoaded && window.google) {
+      geocoder.current = new window.google.maps.Geocoder();
+    }
+  }, [isLoaded]);
 
   // Determine the center of the map
   const center = useMemo(() => {
-    return propCenter || (autoCenter && userLocation) || DEFAULT_MAP_CENTER;
-  }, [propCenter, autoCenter, userLocation]);
+    return propCenter || (autoCenter && currentLocation) || DEFAULT_MAP_CENTER;
+  }, [propCenter, autoCenter, currentLocation]);
 
-  // Initialize services when map loads
+  // Get location name from coordinates
+  const getLocationName = useCallback((lat, lng) => {
+    if (!geocoder.current) return;
+    
+    geocoder.current.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === 'OK') {
+        if (results[0]) {
+          const address = results[0].formatted_address;
+          setLocationName(address);
+          
+          if (onMapClick) {
+            onMapClick({
+              latLng: { lat, lng },
+              address
+            });
+          }
+        } else {
+          setLocationName('No address found');
+        }
+      } else {
+        console.error('Geocoder failed due to: ' + status);
+        setLocationName('Could not get address');
+      }
+    });
+  }, [onMapClick]);
+
+  // Handle map load
   const handleMapLoad = useCallback((map) => {
     setMap(map);
-    
-    // Initialize services when Google Maps is available
-    if (window.google && window.google.maps) {
-      directionsService.current = new window.google.maps.DirectionsService();
-      distanceMatrixService.current = new window.google.maps.DistanceMatrixService();
-      
-      // If we have user location and autoCenter is true, pan to user's location
-      if (autoCenter && userLocation) {
-        map.panTo(userLocation);
-        // Call onMapClick with user's location when it's updated
-        if (onMapClick) {
-          onMapClick({ latLng: userLocation });
-        }
-      }
-      
-      // If we have directions to show, calculate them
-      if (showDirections && origin && destination) {
-        // Use a small timeout to ensure the map is fully loaded
-        const timer = setTimeout(() => {
-          if (window.google && window.google.maps) {
-            calculateDirections(origin, destination, travelMode);
-          } else {
-            console.warn('Google Maps not available for directions calculation');
-          }
-        }, 100);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [showDirections, origin, destination, travelMode, autoCenter, userLocation, onMapClick, calculateDirections]);
-  
-  // Clean up on unmount
+  }, []);
+
+  // Handle map unmount
   const handleMapUnmount = useCallback(() => {
     setMap(null);
   }, []);
 
-  // Update map center when user location changes and autoCenter is true
-  useEffect(() => {
-    if (map && autoCenter && userLocation) {
-      if (window.google && window.google.maps) {
-        map.panTo(userLocation);
-        // Call onMapClick with user's location when it's updated
-        if (onMapClick) {
-          onMapClick({ latLng: userLocation });
-        }
-      } else {
-        console.warn('Google Maps not available for map panning');
-      }
-    }
-  }, [userLocation, map, autoCenter, onMapClick]);
-
-  // Calculate directions when origin or destination changes
-  const calculateDirections = useCallback(async (origin, destination, travelMode) => {
-    if (!origin || !destination || !directionsService.current || !distanceMatrixService.current) {
-      return;
-    }
-
-    // Skip if Google Maps is not loaded yet
-    if (!window.google || !window.google.maps) {
-      console.warn('Google Maps not loaded yet');
-      return;
-    }
-
-    try {
-      setIsDirectionsLoading(true);
-      setDirectionsError(null);
-
-      // Get directions
-      const directionsResult = await directionsService.current.route({
-        origin: { lat: origin.lat, lng: origin.lng },
-        destination: { lat: destination.lat, lng: destination.lng },
-        travelMode: travelMode,
-      });
-
-      // Get distance and duration
-      const distanceMatrixResult = await distanceMatrixService.current.getDistanceMatrix({
-        origins: [{ lat: origin.lat, lng: origin.lng }],
-        destinations: [{ lat: destination.lat, lng: destination.lng }],
-        travelMode: travelMode,
-      });
-
-      const distance = distanceMatrixResult.rows[0].elements[0].distance.value / 1000; // in km
-      const duration = distanceMatrixResult.rows[0].elements[0].duration.value / 60; // in minutes
-
-      setDirectionsResult(directionsResult);
-      setDistance(distance);
-      setDuration(duration);
-      setDirectionsError(null);
-
-      if (onDirectionsChanged) {
-        onDirectionsChanged(directionsResult);
-      }
-
-      if (onDistanceDurationUpdate) {
-        onDistanceDurationUpdate({ distance, duration });
-      }
-    } catch (error) {
-      console.error('Error calculating directions:', error);
-      setDirectionsError('Error calculating directions. Please try again.');
-      setDirectionsResult(null);
-      setDistance(null);
-      setDuration(null);
-    } finally {
-      setIsDirectionsLoading(false);
-    }
-  }, [onDirectionsChanged, onDistanceDurationUpdate]);
-
-  // Recalculate directions when origin, destination, or travel mode changes
-  useEffect(() => {
-    if (showDirections && origin && destination && directionsService.current && distanceMatrixService.current) {
-      // Use a small timeout to ensure the map is fully loaded
-      const timer = setTimeout(() => {
-        if (window.google && window.google.maps) {
-          calculateDirections(origin, destination, travelMode);
-        } else {
-          console.warn('Google Maps not available for directions calculation');
-        }
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [origin, destination, travelMode, showDirections, calculateDirections]);
-
+  // Handle map click
   const handleMapClick = useCallback((e) => {
-    if (onMapClick && e && e.latLng) {
-      onMapClick({
+    if (e && e.latLng) {
+      const location = {
         lat: e.latLng.lat(),
-        lng: e.latLng.lng(),
-      });
+        lng: e.latLng.lng()
+      };
+      
+      setCurrentLocation(location);
+      getLocationName(location.lat, location.lng);
+      
+      if (autoCenter && map) {
+        map.panTo(location);
+      }
     }
-  }, [onMapClick]);
+  }, [map, autoCenter, getLocationName]);
 
-  const handleMarkerClick = useCallback((marker, index) => {
-    if (onMarkerClick) {
-      onMarkerClick(marker, index);
+  // Toggle auto-tracking
+  const toggleTracking = useCallback(() => {
+    if (isTracking) {
+      stopTracking();
+    } else {
+      startTracking();
     }
-  }, [onMarkerClick]);
+  }, [isTracking]);
 
-  const mapOptions = {
-    ...DEFAULT_MAP_OPTIONS,
-    ...options,
-  };
+  // Stop tracking
+  const stopTracking = useCallback(() => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      setWatchId(null);
+      setIsTracking(false);
+    }
+  }, [watchId]);
+
+  // Start tracking
+  const startTracking = useCallback(() => {
+    if (!navigator.geolocation) {
+      const error = 'Geolocation is not supported by your browser';
+      setLocationName(error);
+      return Promise.reject(error);
+    }
+
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1';
+    const isHttps = window.location.protocol === 'https:';
+
+    if (!isLocalhost && !isHttps) {
+      const error = 'Please use HTTPS or localhost for geolocation';
+      setLocationName(error);
+      return Promise.reject(error);
+    }
+
+    setIsTracking(true);
+    
+    // Start watching position
+    const id = navigator.geolocation.watchPosition(
+      (position) => {
+        const location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        setCurrentLocation(location);
+        getLocationName(location.lat, location.lng);
+        
+        if (map) {
+          map.panTo(location);
+        }
+        
+        if (onMapClick) {
+          onMapClick({
+            latLng: location,
+            accuracy: position.coords.accuracy
+          });
+        }
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        setLocationName(`Error: ${error.message}`);
+        setIsTracking(false);
+      },
+      trackingOptions
+    );
+    
+    setWatchId(id);
+    return id;
+  }, [map, onMapClick, getLocationName, trackingOptions]);
+
+  // Get user's current location once
+  const getCurrentLocation = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        const error = 'Geolocation is not supported by your browser';
+        setLocationName(error);
+        reject(error);
+        return;
+      }
+
+      const isLocalhost = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1';
+      const isHttps = window.location.protocol === 'https:';
+
+      if (!isLocalhost && !isHttps) {
+        const error = 'Please use HTTPS or localhost for geolocation';
+        setLocationName(error);
+        reject(error);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const location = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          setCurrentLocation(location);
+          getLocationName(location.lat, location.lng);
+          resolve(location);
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          let errorMessage = 'Error getting your location';
+          switch(error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Location access was denied';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Location information is unavailable';
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'The request to get your location timed out';
+              break;
+            default:
+              errorMessage = 'An unknown error occurred';
+          }
+          setLocationName(errorMessage);
+          reject(errorMessage);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
+    });
+  }, [getLocationName]);
+
+  // Clean up watch on unmount
+  useEffect(() => {
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [watchId]);
+
+  // Start auto-tracking if enabled
+  useEffect(() => {
+    if (enableAutoTracking) {
+      startTracking();
+    }
+    
+    return () => {
+      if (enableAutoTracking) {
+        stopTracking();
+      }
+    };
+  }, [enableAutoTracking, startTracking, stopTracking]);
+
+  // Expose functions via ref
+  React.useImperativeHandle(ref, () => ({
+    getCurrentLocation,
+    getCurrentAddress: () => locationName,
+    getMap: () => map,
+    startTracking,
+    stopTracking,
+    toggleTracking,
+    isTracking: () => isTracking
+  }));
+
+  if (loadError) {
+    return (
+      <Box 
+        sx={{ 
+          display: 'flex', 
+          flexDirection: 'column',
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '100%',
+          backgroundColor: '#ffebee',
+          borderRadius: '4px',
+          p: 2,
+          textAlign: 'center'
+        }}
+      >
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          Error loading map
+        </Typography>
+        <Typography variant="body2" sx={{ mb: 2 }}>
+          {loadError.message || 'Failed to load Google Maps'}
+        </Typography>
+        <Button 
+          variant="outlined" 
+          color="error"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <Box 
+        sx={{ 
+          display: 'flex', 
+          flexDirection: 'column',
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '100%',
+          backgroundColor: '#f5f5f5',
+          borderRadius: '4px',
+          p: 2
+        }}
+      >
+        <CircularProgress />
+        <Typography variant="body1" sx={{ mt: 2 }}>
+          Loading map...
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
-    <div style={{ position: 'relative', ...containerStyle, ...style }}>
+    <Box sx={{ width: '100%', height: '100%', position: 'relative', ...style }}>
       <GoogleMap
-        mapContainerStyle={containerStyle}
+        mapContainerStyle={{ width: '100%', height: '100%', ...MAP_CONTAINER_STYLE }}
         center={center}
         zoom={zoom}
         onLoad={handleMapLoad}
         onUnmount={handleMapUnmount}
         onClick={handleMapClick}
-        options={mapOptions}
+        options={{
+          ...DEFAULT_MAP_OPTIONS,
+          ...options,
+        }}
         {...rest}
       >
-          {/* Markers */}
-          {markers.map((marker, index) => (
-            <Marker
-              key={marker.id || index}
-              position={marker.position}
-              onClick={() => handleMarkerClick(marker, index)}
-              icon={marker.icon}
-            >
-              {marker.infoWindow && selectedMarker === marker && (
-                <InfoWindow onCloseClick={() => onMarkerClick(null, index)}>
-                  <div>{marker.infoWindow}</div>
-                </InfoWindow>
-              )}
-            </Marker>
-          ))}
-
-          {/* Directions */}
-          {showDirections && directionsResult && (
-            <DirectionsRenderer
-              directions={directionsResult}
-              options={{
-                suppressMarkers: true,
-                polylineOptions: {
-                  strokeColor: '#1976d2',
-                  strokeWeight: 4,
-                  strokeOpacity: 0.8,
-                },
-              }}
-            />
-          )}
-
-          {children}
-        </GoogleMap>
-
-      {/* Loading indicator */}
-      {isDirectionsLoading && (
-        <Box
-          position="absolute"
-          top={0}
-          left={0}
-          right={0}
-          bottom={0}
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          bgcolor="rgba(255, 255, 255, 0.7)"
-          zIndex={1}
+        {children}
+        {currentLocation && (
+          <Marker
+            position={currentLocation}
+            icon={{
+              url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+              scaledSize: new window.google.maps.Size(40, 40),
+            }}
+          />
+        )}
+        {markers.map((marker, index) => (
+          <Marker
+            key={index}
+            position={marker.position}
+            title={marker.title}
+            icon={marker.icon}
+          />
+        ))}
+      </GoogleMap>
+      
+      {/* Location info */}
+      <Box sx={{ 
+        position: 'absolute', 
+        top: 16, 
+        left: 16, 
+        right: 16,
+        backgroundColor: 'white', 
+        padding: 1.5, 
+        borderRadius: 1, 
+        boxShadow: 3,
+        zIndex: 1,
+        maxWidth: 400,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <Typography variant="subtitle2" noWrap sx={{ flex: 1, mr: 1 }}>
+          {locationName}
+        </Typography>
+        <Button 
+          variant={isTracking ? 'contained' : 'outlined'}
+          color="primary"
+          size="small"
+          onClick={toggleTracking}
+          startIcon={
+            isTracking ? (
+              <Box component="span" sx={{ 
+                width: 12, 
+                height: 12, 
+                borderRadius: '50%', 
+                backgroundColor: 'error.main',
+                animation: 'pulse 2s infinite',
+                '@keyframes pulse': {
+                  '0%': { opacity: 0.6 },
+                  '50%': { opacity: 1 },
+                  '100%': { opacity: 0.6 }
+                }
+              }} />
+            ) : (
+              <Box component="span" sx={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid', borderColor: 'primary.main' }} />
+            )
+          }
         >
-          <CircularProgress />
-        </Box>
-      )}
-
-      {/* Error message */}
-      {directionsError && (
-        <Box
-          position="absolute"
-          top={10}
-          left={10}
-          right={10}
-          bgcolor="#ffebee"
-          color="#d32f2f"
-          p={2}
-          borderRadius={1}
-          boxShadow={1}
-          zIndex={1}
-        >
-          <Typography variant="body2">{directionsError}</Typography>
-        </Box>
-      )}
-
-      {/* Distance and duration info */}
-      {distance !== null && duration !== null && (
-        <Box
-          position="absolute"
-          bottom={10}
-          left={10}
-          bgcolor="white"
-          p={1.5}
-          borderRadius={1}
-          boxShadow={2}
-          zIndex={1}
-        >
-          <Typography variant="body2">
-            <Box component="span" fontWeight="bold">Distance:</Box> {distance.toFixed(1)} km
-          </Typography>
-          <Typography variant="body2">
-            <Box component="span" fontWeight="bold">Duration:</Box> {Math.round(duration)} min
-          </Typography>
-        </Box>
-      )}
-    </div>
+          {isTracking ? 'Tracking' : 'Track Me'}
+        </Button>
+      </Box>
+    </Box>
   );
-};
+});
 
-// Main Map component that handles script loading
-const Map = (props) => {
-  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
-
-  useEffect(() => {
-    // Check if Google Maps is already loaded
-    if (isGoogleMapsLoaded()) {
-      setIsMapsLoaded(true);
-      return;
-    }
-
-    // If not loaded, set up a listener for when it does load
-    const checkMapsLoaded = () => {
-      if (isGoogleMapsLoaded()) {
-        setIsMapsLoaded(true);
-      }
-    };
-
-    // Check every 100ms if maps is loaded
-    const interval = setInterval(checkMapsLoaded, 100);
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <GoogleMapsProvider>
-      {isMapsLoaded ? (
-        <MapComponent {...props} />
-      ) : (
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: '400px',
-          width: '100%',
-          backgroundColor: '#f5f5f5',
-          borderRadius: '4px',
-          border: '1px solid #e0e0e0'
-        }}>
-          <CircularProgress size={24} />
-          <Typography variant="body1" sx={{ ml: 2 }}>Loading map...</Typography>
-        </Box>
-      )}
-    </GoogleMapsProvider>
-  );
-};
+Map.displayName = 'Map';
 
 export default Map;

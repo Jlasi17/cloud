@@ -1,7 +1,8 @@
 // Geocoding service utilities
 export const getGeocodingClient = () => {
   if (!window.google || !window.google.maps) {
-    throw new Error('Google Maps API not loaded');
+    console.warn('Google Maps API not loaded yet');
+    return null;
   }
   return new window.google.maps.Geocoder();
 };
@@ -37,13 +38,19 @@ export const geocodeAddress = async (address) => {
 
 export const reverseGeocode = async (lat, lng) => {
   const geocoder = getGeocodingClient();
+  if (!geocoder) {
+    console.warn('Geocoder not available - Google Maps API might not be loaded');
+    return null;
+  }
+  
   try {
     const response = await new Promise((resolve, reject) => {
       geocoder.geocode({ location: { lat, lng } }, (results, status) => {
         if (status === 'OK') {
           resolve(results);
         } else {
-          reject(new Error(`Reverse geocoding failed: ${status}`));
+          console.warn(`Reverse geocoding failed with status: ${status}`);
+          resolve(null); // Resolve with null instead of rejecting
         }
       });
     });

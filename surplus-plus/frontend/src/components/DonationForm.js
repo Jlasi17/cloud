@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -43,8 +43,9 @@ const DonationForm = ({ onClose, onSuccess }) => {
   const [success, setSuccess] = useState(false);
   const [errors, setErrors] = useState({});
   const [mapDialogOpen, setMapDialogOpen] = useState(false);
-  const { location: userLocation, error: locationError } = useGeolocation();
+  const mapRef = useRef(null);
   const [selectedLocation, setSelectedLocation] = useState(null);
+  const [locationError, setLocationError] = useState(null);
 
   const [formData, setFormData] = useState({
     foodType: '',
@@ -63,30 +64,33 @@ const DonationForm = ({ onClose, onSuccess }) => {
     'Other',
   ];
 
-  // Set initial location when geolocation is available
-  useEffect(() => {
-    const initializeLocation = async () => {
-      try {
-        // Only set initial location if we don't have one and user location is available
-        if (userLocation && !selectedLocation) {
-          // Check if userLocation has valid coordinates
-          if (userLocation.lat && userLocation.lng) {
-            setSelectedLocation(userLocation);
-            await updateAddressFromLocation(userLocation);
-          }
-        }
-      } catch (error) {
-        console.error('Error initializing location:', error);
-      }
-    };
+  // Handle getting current location from the map
+  const handleGetCurrentLocation = async () => {
+    if (!mapRef.current) {
+      setErrors(prev => ({
+        ...prev,
+        location: 'Map is not ready. Please try again.'
+      }));
+      return;
+    }
 
-    initializeLocation();
-  }, [userLocation]); // Only depend on userLocation
+    try {
+      const location = await mapRef.current.getCurrentLocation();
+      setSelectedLocation(location);
+      await updateAddressFromLocation(location);
+    } catch (error) {
+      console.error('Error getting location:', error);
+      setErrors(prev => ({
+        ...prev,
+        location: error.message || 'Could not get your location. Please enter it manually.'
+      }));
+    }
+  };
 
   const updateAddressFromLocation = async (location) => {
     try {
       const result = await reverseGeocode(location.lat, location.lng);
-      if (result) {
+      if (result?.address) {
         setFormData(prev => ({
           ...prev,
           location: result.address
@@ -94,12 +98,24 @@ const DonationForm = ({ onClose, onSuccess }) => {
         if (errors.location) {
           setErrors(prev => ({ ...prev, location: '' }));
         }
+      } else {
+        // If geocoding fails, still update the form with coordinates
+        setFormData(prev => ({
+          ...prev,
+          location: `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`
+        }));
       }
     } catch (error) {
-      console.error('Error updating address:', error);
+      console.warn('Geocoding not available, using coordinates:', error);
+      // Fallback to showing coordinates if geocoding fails
+      setFormData(prev => ({
+        ...prev,
+        location: `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`
+      }));
+      
       setErrors(prev => ({
         ...prev,
-        location: 'Could not determine address for this location'
+        location: 'Could not determine address for this location. Using coordinates instead.'
       }));
     }
   };
@@ -335,23 +351,21 @@ const DonationForm = ({ onClose, onSuccess }) => {
                   value={formData.estimatedSpoilTime}
                   onChange={handleDateTimeChange}
                   minDateTime={new Date()}
-                  inputFormat="MM/dd/yyyy hh:mm a"
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      fullWidth
-                      error={!!errors.estimatedSpoilTime}
-                      helperText={errors.estimatedSpoilTime}
-                      InputProps={{
-                        ...params.InputProps,
+                  format="MM/dd/yyyy hh:mm a"
+                  slotProps={{
+                    textField: {
+                      fullWidth: true,
+                      error: !!errors.estimatedSpoilTime,
+                      helperText: errors.estimatedSpoilTime,
+                      InputProps: {
                         startAdornment: (
                           <InputAdornment position="start">
                             <TimeIcon color={errors.estimatedSpoilTime ? "error" : "action"} />
                           </InputAdornment>
                         ),
-                      }}
-                    />
-                  )}
+                      },
+                    },
+                  }}
                 />
                 {errors.estimatedSpoilTime && (
                   <FormHelperText>{errors.estimatedSpoilTime}</FormHelperText>
@@ -438,7 +452,7 @@ const DonationForm = ({ onClose, onSuccess }) => {
               <DialogTitle>Select Location</DialogTitle>
               <DialogContent sx={{ height: '500px' }}>
                 <Map
-                  center={selectedLocation || userLocation}
+                  center={selectedLocation}
                   onMapClick={handleMapClick}
                   markers={selectedLocation ? [{ position: selectedLocation }] : []}
                   style={{ height: '100%', width: '100%', borderRadius: '4px' }}
