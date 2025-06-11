@@ -24,9 +24,17 @@ const requestSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  coordinates: {
+    type: {
+      lat: Number,
+      lng: Number
+    },
+    required: true,
+    index: '2dsphere' // Enable geospatial queries
+  },
   status: {
     type: String,
-    enum: ['Pending', 'Matched', 'Completed'],
+    enum: ['Pending', 'In Progress', 'Matched', 'Completed'],
     default: 'Pending'
   },
   donorId: {
@@ -51,7 +59,9 @@ const requestSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Create indexes
 requestSchema.index({ requesterId: 1 });
+requestSchema.index({ coordinates: '2dsphere' }); // Enable geospatial queries
 requestSchema.index({ status: 1 });
 requestSchema.index({ createdAt: -1 });
 

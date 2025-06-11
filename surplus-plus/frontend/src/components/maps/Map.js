@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+import { GoogleMap, Marker } from '@react-google-maps/api';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
+
+// Define libraries array as a static constant
+const GOOGLE_MAPS_LIBRARIES = ['places'];
 
 // Default configuration
 const DEFAULT_MAP_CENTER = {
@@ -61,21 +64,19 @@ const Map = React.forwardRef((props, ref) => {
   const [locationName, setLocationName] = useState('Click on map to select location');
   const [isTracking, setIsTracking] = useState(false);
   const [watchId, setWatchId] = useState(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const geocoder = useRef(null);
   
-  // Load Google Maps API
-  const { isLoaded, loadError } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
-    libraries: ['places'],
-  });
-
-  // Initialize geocoder when Google Maps is loaded
+  // Check if Google Maps is loaded
   useEffect(() => {
-    if (isLoaded && window.google) {
+    if (window.google && window.google.maps) {
+      setIsLoaded(true);
       geocoder.current = new window.google.maps.Geocoder();
+    } else {
+      setLoadError('Google Maps not loaded');
     }
-  }, [isLoaded]);
+  }, []);
 
   // Determine the center of the map
   const center = useMemo(() => {
@@ -153,66 +154,13 @@ const Map = React.forwardRef((props, ref) => {
     }
   }, [watchId]);
 
-  // Start tracking
-  const startTracking = useCallback(() => {
-    if (!navigator.geolocation) {
-      const error = 'Geolocation is not supported by your browser';
-      setLocationName(error);
-      return Promise.reject(error);
-    }
-
-    const isLocalhost = window.location.hostname === 'localhost' || 
-                     window.location.hostname === '127.0.0.1';
-    const isHttps = window.location.protocol === 'https:';
-
-    if (!isLocalhost && !isHttps) {
-      const error = 'Please use HTTPS or localhost for geolocation';
-      setLocationName(error);
-      return Promise.reject(error);
-    }
-
-    setIsTracking(true);
-    
-    // Start watching position
-    const id = navigator.geolocation.watchPosition(
-      (position) => {
-        const location = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        };
-        setCurrentLocation(location);
-        getLocationName(location.lat, location.lng);
-        
-        if (map) {
-          map.panTo(location);
-        }
-        
-        if (onMapClick) {
-          onMapClick({
-            latLng: location,
-            accuracy: position.coords.accuracy
-          });
-        }
-      },
-      (error) => {
-        console.error('Error getting location:', error);
-        setLocationName(`Error: ${error.message}`);
-        setIsTracking(false);
-      },
-      trackingOptions
-    );
-    
-    setWatchId(id);
-    return id;
-  }, [map, onMapClick, getLocationName, trackingOptions]);
-
   // Get user's current location once
   const getCurrentLocation = useCallback(() => {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
         const error = 'Geolocation is not supported by your browser';
         setLocationName(error);
-        reject(error);
+        reject(new Error(error));
         return;
       }
 
@@ -223,38 +171,46 @@ const Map = React.forwardRef((props, ref) => {
       if (!isLocalhost && !isHttps) {
         const error = 'Please use HTTPS or localhost for geolocation';
         setLocationName(error);
-        reject(error);
+        reject(new Error(error));
         return;
       }
 
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const location = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-          setCurrentLocation(location);
-          getLocationName(location.lat, location.lng);
-          resolve(location);
+          try {
+            const location = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            setCurrentLocation(location);
+            getLocationName(location.lat, location.lng).catch(err => {
+              console.warn('Error getting location name:', err);
+              // Don't reject here, just log the warning
+            });
+            resolve(location);
+          } catch (err) {
+            console.error('Error processing location:', err);
+            reject(new Error('Error processing location data'));
+          }
         },
         (error) => {
           console.error('Error getting location:', error);
           let errorMessage = 'Error getting your location';
           switch(error.code) {
             case error.PERMISSION_DENIED:
-              errorMessage = 'Location access was denied';
+              errorMessage = 'Location access was denied. Please enable location services in your browser settings.';
               break;
             case error.POSITION_UNAVAILABLE:
-              errorMessage = 'Location information is unavailable';
+              errorMessage = 'Location information is unavailable. Please try again later.';
               break;
             case error.TIMEOUT:
-              errorMessage = 'The request to get your location timed out';
+              errorMessage = 'The request to get your location timed out. Please check your internet connection.';
               break;
             default:
-              errorMessage = 'An unknown error occurred';
+              errorMessage = 'An unknown error occurred while getting your location.';
           }
           setLocationName(errorMessage);
-          reject(errorMessage);
+          reject(new Error(errorMessage));
         },
         {
           enableHighAccuracy: true,
@@ -264,6 +220,82 @@ const Map = React.forwardRef((props, ref) => {
       );
     });
   }, [getLocationName]);
+
+  // Start tracking with improved error handling
+  const startTracking = useCallback(() => {
+    if (!navigator.geolocation) {
+      const error = 'Geolocation is not supported by your browser';
+      setLocationName(error);
+      return Promise.reject(new Error(error));
+    }
+
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1';
+    const isHttps = window.location.protocol === 'https:';
+
+    if (!isLocalhost && !isHttps) {
+      const error = 'Please use HTTPS or localhost for geolocation';
+      setLocationName(error);
+      return Promise.reject(new Error(error));
+    }
+
+    setIsTracking(true);
+    
+    // Start watching position with error handling
+    const id = navigator.geolocation.watchPosition(
+      (position) => {
+        try {
+          const location = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          setCurrentLocation(location);
+          getLocationName(location.lat, location.lng).catch(err => {
+            console.warn('Error getting location name:', err);
+            // Continue tracking even if we can't get the location name
+          });
+          
+          if (map) {
+            map.panTo(location);
+          }
+          
+          if (onMapClick) {
+            onMapClick({
+              latLng: location,
+              accuracy: position.coords.accuracy
+            });
+          }
+        } catch (err) {
+          console.error('Error processing location update:', err);
+          // Continue tracking even if we have an error processing one update
+        }
+      },
+      (error) => {
+        console.error('Error tracking location:', error);
+        let errorMessage = 'Error tracking your location';
+        switch(error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Location access was denied. Please enable location services.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Location information is unavailable.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Location tracking timed out.';
+            break;
+          default:
+            errorMessage = 'An unknown error occurred while tracking location.';
+        }
+        setLocationName(errorMessage);
+        setIsTracking(false);
+        stopTracking();
+      },
+      trackingOptions
+    );
+    
+    setWatchId(id);
+    return id;
+  }, [map, onMapClick, getLocationName, trackingOptions, stopTracking]);
 
   // Clean up watch on unmount
   useEffect(() => {
@@ -317,7 +349,7 @@ const Map = React.forwardRef((props, ref) => {
           Error loading map
         </Typography>
         <Typography variant="body2" sx={{ mb: 2 }}>
-          {loadError.message || 'Failed to load Google Maps'}
+          {loadError}
         </Typography>
         <Button 
           variant="outlined" 

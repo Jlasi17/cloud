@@ -124,7 +124,7 @@ router.post('/login', async (req, res) => {
 });
 
 // Refresh token route
-router.post('/api/auth/refresh', async (req, res) => {
+router.post('/refresh', async (req, res) => {
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) {
@@ -162,11 +162,15 @@ router.post('/api/auth/refresh', async (req, res) => {
         }
       });
     } catch (jwtError) {
-      return res.status(401).json({ message: 'Invalid refresh token' });
+      console.error('JWT verification failed:', jwtError);
+      return res.status(401).json({ 
+        message: 'Invalid refresh token',
+        error: jwtError.name === 'TokenExpiredError' ? 'Refresh token expired' : 'Invalid token'
+      });
     }
   } catch (error) {
     console.error('Refresh token error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

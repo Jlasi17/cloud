@@ -11,10 +11,25 @@ const refreshApi = axios.create({
 
 // Create main API instance
 const api = axios.create({
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
 
 // Export the refresh token function using the separate instance
 export const refreshToken = async () => {
@@ -28,11 +43,17 @@ export const refreshToken = async () => {
       refreshToken,
     });
 
-    localStorage.setItem('token', response.data.token);
-    localStorage.setItem('refreshToken', response.data.refreshToken);
-    return response.data.token;
+    if (response.data?.token) {
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('refreshToken', response.data.refreshToken);
+      return response.data.token;
+    }
+    return null;
   } catch (error) {
     console.error('Token refresh failed:', error);
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
     return null;
   }
 };
@@ -59,28 +80,49 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     
     if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        try {
+          const token = await new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          });
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+
       originalRequest._retry = true;
+      isRefreshing = true;
       
       try {
         const token = await refreshToken();
+        isRefreshing = false;
+        
         if (token) {
           originalRequest.headers.Authorization = `Bearer ${token}`;
+          processQueue(null, token);
           return api(originalRequest);
         } else {
+          processQueue(new Error('Failed to refresh token'));
           // If refresh fails, clear localStorage and show error
           localStorage.removeItem('token');
           localStorage.removeItem('refreshToken');
           localStorage.removeItem('user');
+          window.location.href = '/login'; // Redirect to login
           return Promise.reject({
             ...error,
             isTokenExpired: true
           });
         }
       } catch (refreshError) {
+        isRefreshing = false;
+        processQueue(refreshError);
         console.error('Token refresh failed:', refreshError);
         localStorage.removeItem('token');
         localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');
+        window.location.href = '/login'; // Redirect to login
         return Promise.reject({
           ...error,
           isTokenExpired: true
@@ -92,5 +134,4 @@ api.interceptors.response.use(
   }
 );
 
-export default api;
 export const axiosInstance = api;

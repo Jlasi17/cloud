@@ -23,6 +23,23 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'delivery'],
     required: true
   },
+  costPerKm: {
+    type: Number,
+    default: 10, // Default cost per km in INR
+    min: 1
+  },
+  location: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number],
+      default: [0, 0] // [longitude, latitude]
+    },
+    address: String
+  },
   createdAt: {
     type: Date,
     default: Date.now

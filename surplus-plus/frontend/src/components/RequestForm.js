@@ -486,6 +486,16 @@ const RequestForm = ({ onClose, onDonationSelect, initialData, onSuccess, mode =
       return;
     }
 
+    // Validate that location coordinates are available
+    if (!selectedLocation) {
+      setErrors(prev => ({
+        ...prev,
+        location: 'Please select a location on the map'
+      }));
+      setLoading(false);
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) {
@@ -497,7 +507,11 @@ const RequestForm = ({ onClose, onDonationSelect, initialData, onSuccess, mode =
         {
           ...formData,
           quantity: Number(formData.quantity) || 1, // Default to 1 if not provided
-          status: 'pending'
+          status: 'pending',
+          coordinates: {
+            lat: selectedLocation.lat,
+            lng: selectedLocation.lng
+          }
         },
         {
           headers: {

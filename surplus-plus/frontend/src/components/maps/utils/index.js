@@ -119,3 +119,47 @@ export const getCenterPoint = (points) => {
     lng: sum.lng / points.length
   };
 };
+
+/**
+ * Calculate distance between two points using Haversine formula
+ * @param {Object} coord1 - First coordinate with lat and lng properties
+ * @param {Object} coord2 - Second coordinate with lat and lng properties
+ * @returns {number} Distance in kilometers
+ */
+export const calculateDistance = (coord1, coord2) => {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = toRad(coord2.lat - coord1.lat);
+  const dLon = toRad(coord2.lng - coord1.lng);
+  const lat1 = toRad(coord1.lat);
+  const lat2 = toRad(coord2.lat);
+
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+           Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+/**
+ * Convert degrees to radians
+ * @param {number} degrees - Angle in degrees
+ * @returns {number} Angle in radians
+ */
+const toRad = (degrees) => {
+  return degrees * Math.PI / 180;
+};
+
+/**
+ * Get maximum allowed distance based on food type
+ * @param {string} foodType - Type of food
+ * @returns {number} Maximum allowed distance in kilometers
+ */
+export const getMaxDistanceForFoodType = (foodType) => {
+  const distanceMap = {
+    'Cooked Food': 10, // Fresh food needs to be delivered quickly
+    'Fruits & Vegetables': 20, // Perishable but not as critical as cooked food
+    'Packet Food': 40, // Non-perishable can travel further
+    'Pulses': 40, // Non-perishable can travel further
+    'Other': 30 // Default medium range
+  };
+  return distanceMap[foodType] || 30; // Default to 30km if food type not found
+};

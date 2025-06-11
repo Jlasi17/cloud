@@ -24,13 +24,30 @@ const donationSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  coordinates: {
+    type: {
+      lat: Number,
+      lng: Number
+    },
+    required: true,
+    index: '2dsphere' // Enable geospatial queries
+  },
+  estimatedValue: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  spoilTime: {
+    type: Date,
+    required: true
+  },
   marketCost: {
     type: String,
     required: true
   },
   status: {
     type: String,
-    enum: ['Available', 'Matched', 'Expired', 'Delivered'],
+    enum: ['Available', 'In Progress', 'Matched', 'Paid', 'Expired', 'Delivered'],
     default: 'Available'
   },
   receiverId: {
@@ -56,6 +73,7 @@ const donationSchema = new mongoose.Schema({
 });
 
 donationSchema.index({ donorId: 1 });
+donationSchema.index({ coordinates: '2dsphere' }); // Enable geospatial queries
 donationSchema.index({ status: 1 });
 donationSchema.index({ createdAt: -1 });
 

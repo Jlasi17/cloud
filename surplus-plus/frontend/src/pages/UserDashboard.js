@@ -401,8 +401,9 @@ export default function UserDashboard() {
     });
   };
   
-  const handleDonationSelect = (donation) => {
+  const handleDonationSelect = (donation, request) => {
     setSelectedDonation(donation);
+    setSelectedRequest(request);
     setOpenPaymentForm(true);
   };
 
@@ -502,17 +503,68 @@ export default function UserDashboard() {
   const fetchDonations = async () => {
     try {
       setLoading(true);
+      setError('');
+
+      // Check authentication first
+      if (!await checkToken()) {
+        navigate('/login');
+        return;
+      }
+
       const response = await axiosInstance.get(endpoints.donations.myDonations);
+      
+      if (!response.data || !Array.isArray(response.data.donations)) {
+        throw new Error('Invalid response format from server');
+      }
+
       setDonations(response.data.donations);
       setStats({
         totalDonations: response.data.donations.length,
         completedDonations: response.data.donations.filter(d => d.status === 'Completed').length,
         activeRequests: requests.length,
-        totalImpact: response.data.donations.reduce((sum, d) => sum + (d.quantity || 1), 0),
+        totalImpact: response.data.donations.reduce((sum, d) => sum + (parseFloat(d.quantity) || 1), 0),
       });
     } catch (error) {
       console.error('Error fetching donations:', error);
-      showError('Failed to fetch donations');
+      
+      let errorMessage = 'Failed to fetch donations. ';
+      
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        switch (error.response.status) {
+          case 401:
+            errorMessage += 'Please log in again.';
+            navigate('/login');
+            break;
+          case 403:
+            errorMessage += 'You do not have permission to view these donations.';
+            break;
+          case 404:
+            errorMessage += 'No donations found.';
+            break;
+          case 500:
+            errorMessage += 'Server error. Please try again later.';
+            break;
+          default:
+            errorMessage += error.response.data?.message || 'Please try again.';
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage += 'No response from server. Please check your internet connection.';
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage += error.message || 'An unexpected error occurred.';
+      }
+      
+      showError(errorMessage);
+      setDonations([]);
+      setStats({
+        totalDonations: 0,
+        completedDonations: 0,
+        activeRequests: 0,
+        totalImpact: 0,
+      });
     } finally {
       setLoading(false);
     }
@@ -1020,6 +1072,7 @@ export default function UserDashboard() {
         open={openPaymentForm}
         onClose={() => setOpenPaymentForm(false)}
         donation={selectedDonation}
+        request={selectedRequest}
         onSuccess={handlePaymentSuccess}
       />
 

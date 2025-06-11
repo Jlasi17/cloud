@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -17,7 +17,8 @@ import {
   InputAdornment,
   Paper,
   Avatar,
-  Chip
+  Chip,
+  Stack
 } from '@mui/material';
 import { 
   CreditCard as CreditCardIcon, 
@@ -27,24 +28,45 @@ import {
   Person as PersonIcon,
   Fastfood as FoodIcon,
   Scale as ScaleIcon,
-  LocationOn as LocationIcon
+  LocationOn as LocationIcon,
+  Notes as NotesIcon
 } from '@mui/icons-material';
-import Stack from '@mui/material/Stack';
-import NotesIcon from '@mui/icons-material/Notes';
 import { useAuth } from '../context/AuthContext';
 import { axiosInstance } from '../utils/axios';
 import { endpoints } from '../config/api';
 
-const PaymentForm = ({ open, onClose, donation, onSuccess }) => {
+const PaymentForm = ({ open, onClose, donation, request, onSuccess }) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [calculatedPrice, setCalculatedPrice] = useState(null);
   const [cardDetails, setCardDetails] = useState({
     cardNumber: '',
     expiryDate: '',
     cvv: '',
-    cardHolder: ''
+    cardHolder: user?.name || ''
   });
+
+  useEffect(() => {
+    const calculatePrice = async () => {
+      if (!donation) return;
+
+      try {
+        const response = await axiosInstance.post(
+          endpoints.donations.calculatePrice,
+          {
+            donationId: donation._id
+          }
+        );
+        setCalculatedPrice(response.data);
+      } catch (error) {
+        console.error('Error calculating price:', error);
+        setError('Failed to calculate price. Please try again.');
+      }
+    };
+
+    calculatePrice();
+  }, [donation]);
 
   const handleCardChange = (e) => {
     const { name, value } = e.target;
@@ -89,22 +111,106 @@ const PaymentForm = ({ open, onClose, donation, onSuccess }) => {
         throw new Error('Please fill in all card details');
       }
 
+      if (!donation || !donation._id) {
+        throw new Error('Invalid donation selected');
+      }
+
+      if (!user || !user._id) {
+        throw new Error('You must be logged in to complete this action');
+      }
+
+      // Validate donation status first
+      const donationId = donation._id.toString();
+      const checkResponse = await axiosInstance.get(`${endpoints.donations.list}/${donationId}`);
+      const currentDonation = checkResponse.data;
+      
+      if (!currentDonation) {
+        throw new Error('Donation no longer exists');
+      }
+
+      if (currentDonation.status !== 'Available') {
+        throw new Error('This donation is no longer available');
+      }
+
       // Simulate payment processing
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // Update donation status to matched
-      await axiosInstance.put(`${endpoints.donations.list}/${donation._id}`, {
-        status: 'Matched',
-        receiverId: user._id
+      // Update donation status to In Progress
+      const updateResponse = await axiosInstance.put(
+        endpoints.donations.update(donationId),
+        {
+          status: 'In Progress',
+          receiverId: user._id
+        }
+      );
+
+      if (!updateResponse.data?.donation) {
+        throw new Error('Failed to update donation status');
+      }
+
+      // Create a transaction record
+      await axiosInstance.post(endpoints.transactions.create, {
+        donationId: donationId,
+        donorId: donation.donorId,
+        receiverId: user._id,
+        amount: donation.marketCost,
+        status: 'In Progress',
+        paymentMethod: 'Card'
       });
 
+      // Mark the associated request as in progress if it exists
+      if (request?._id) {
+        await axiosInstance.put(
+          endpoints.requests.update(request._id),
+          {
+            status: 'In Progress',
+            donorId: donation.donorId,
+            donationId: donationId
+          }
+        );
+      }
+
       if (onSuccess) {
-        onSuccess();
+        onSuccess(updateResponse.data.donation);
       }
       onClose();
     } catch (err) {
       console.error('Payment failed:', err);
-      setError(err.response?.data?.message || err.message || 'Payment failed. Please try again or use a different payment method.');
+      let errorMessage = 'Payment failed. ';
+      
+      if (err.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        switch (err.response.status) {
+          case 400:
+            errorMessage += err.response.data?.message || 'Invalid request data.';
+            break;
+          case 401:
+            errorMessage += 'Please log in again.';
+            // Redirect to login if token is invalid
+            window.location.href = '/login';
+            break;
+          case 403:
+            errorMessage += 'You do not have permission to perform this action.';
+            break;
+          case 404:
+            errorMessage += 'Donation not found.';
+            break;
+          case 500:
+            errorMessage += 'Server error. Please try again later.';
+            break;
+          default:
+            errorMessage += err.response.data?.message || 'Please try again.';
+        }
+      } else if (err.request) {
+        // The request was made but no response was received
+        errorMessage += 'No response from server. Please check your internet connection.';
+      } else {
+        // Something happened in setting up the request
+        errorMessage += err.message || 'An unexpected error occurred.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -166,10 +272,10 @@ const PaymentForm = ({ open, onClose, donation, onSuccess }) => {
                   </Avatar>
                   <Box>
                     <Typography variant="subtitle1" fontWeight="medium">
-                      {donation.foodType}
+                      {donation?.foodType}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Donation ID: {donation._id.slice(-6).toUpperCase()}
+                      Donation ID: {donation?._id?.slice(-6).toUpperCase()}
                     </Typography>
                   </Box>
                 </Box>
@@ -178,16 +284,16 @@ const PaymentForm = ({ open, onClose, donation, onSuccess }) => {
                   <Box display="flex" alignItems="center">
                     <ScaleIcon color="action" sx={{ mr: 2 }} />
                     <Typography variant="body1">
-                      <strong>Quantity:</strong> {donation.quantity} kg
+                      <strong>Quantity:</strong> {donation?.quantity} kg
                     </Typography>
                   </Box>
                   <Box display="flex" alignItems="center">
                     <LocationIcon color="action" sx={{ mr: 2 }} />
                     <Typography variant="body1">
-                      <strong>Pickup Location:</strong> {donation.location}
+                      <strong>Pickup Location:</strong> {donation?.location}
                     </Typography>
                   </Box>
-                  {donation.notes && (
+                  {donation?.notes && (
                     <Box display="flex" alignItems="flex-start">
                       <NotesIcon color="action" sx={{ mr: 2, mt: 0.5 }} />
                       <Typography variant="body1">
@@ -201,25 +307,55 @@ const PaymentForm = ({ open, onClose, donation, onSuccess }) => {
                 
                 <Box sx={{ 
                   p: 2,
-                  bgcolor: 'success.light',
+                  bgcolor: calculatedPrice?.finalPrice > 0 ? 'primary.light' : 'success.light',
                   borderRadius: 1,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
                 }}>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    Total Amount:
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Price Breakdown:
                   </Typography>
-                  <Chip 
-                    label="FREE" 
-                    color="success"
-                    size="medium"
-                    sx={{ 
-                      fontWeight: 'bold',
-                      fontSize: '1rem',
-                      px: 2
-                    }}
-                  />
+                  {calculatedPrice ? (
+                    <>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2">Original Price:</Typography>
+                        <Typography variant="body2">₹{calculatedPrice.originalPrice}</Typography>
+                      </Box>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2">Time Discount:</Typography>
+                        <Typography variant="body2">{calculatedPrice.priceBreakdown.timeDiscount}%</Typography>
+                      </Box>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2">Quantity Discount:</Typography>
+                        <Typography variant="body2">{calculatedPrice.priceBreakdown.quantityDiscount}%</Typography>
+                      </Box>
+                      <Box display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2">Food Type Factor:</Typography>
+                        <Typography variant="body2">{calculatedPrice.priceBreakdown.foodTypeMultiplier}%</Typography>
+                      </Box>
+                      <Divider sx={{ my: 1 }} />
+                      <Box display="flex" justifyContent="space-between" alignItems="center">
+                        <Typography variant="subtitle1" fontWeight="bold">
+                          Final Price:
+                        </Typography>
+                        <Chip 
+                          label={calculatedPrice.finalPrice > 0 ? `₹${calculatedPrice.finalPrice}` : 'FREE'} 
+                          color={calculatedPrice.finalPrice > 0 ? 'primary' : 'success'}
+                          size="medium"
+                          sx={{ 
+                            fontWeight: 'bold',
+                            fontSize: '1rem',
+                            px: 2
+                          }}
+                        />
+                      </Box>
+                      <Typography variant="body2" color="text.secondary" mt={1} textAlign="center">
+                        Total Discount: {calculatedPrice.discountPercentage}%
+                      </Typography>
+                    </>
+                  ) : (
+                    <Box display="flex" justifyContent="center" alignItems="center" py={2}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  )}
                 </Box>
               </Paper>
             </Grid>

@@ -52,7 +52,7 @@ const LoginPage = () => {
     setIsLoading(true);
     try {
       await login({ email: formData.email, password: formData.password, role });
-      navigate(role === 'user' ? '/user/dashboard' : '/delivery-partner/dashboard');
+      navigate(role === 'user' ? '/user/dashboard' : '/delivery/dashboard');
     } catch (error) {
       setError(error.message || 'Failed to sign in. Please try again.');
       setIsLoading(false);
