@@ -248,4 +248,35 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Find and update request by details
+router.post('/find-and-update', async (req, res) => {
+  try {
+    const { foodType, urgency, location, status } = req.body;
+
+    // Find the request with matching details
+    const request = await Request.findOne({
+      foodType,
+      urgency,
+      location,
+      status: 'Pending'
+    });
+
+    if (!request) {
+      return res.status(404).json({ message: 'Request not found' });
+    }
+
+    // Update the request status
+    request.status = status || 'Completed';
+    await request.save();
+
+    res.json({
+      message: 'Request updated successfully',
+      request
+    });
+  } catch (error) {
+    console.error('Error updating request:', error);
+    res.status(500).json({ message: 'Error updating request', error: error.message });
+  }
+});
+
 module.exports = router;

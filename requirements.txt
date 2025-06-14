@@ -26,3 +26,4 @@ pytest-django>=4.5.2
 # Production
 gunicorn>=20.1.0
 whitenoise>=6.2.0
+stripe>=10.1.0

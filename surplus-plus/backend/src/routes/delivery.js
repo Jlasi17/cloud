@@ -4,6 +4,10 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const Donation = require('../models/Donation');
 const Request = require('../models/Request');
+<<<<<<< Updated upstream
+=======
+const Transaction = require('../models/Transaction');
+>>>>>>> Stashed changes
 
 // Middleware to verify JWT token
 const auth = (req, res, next) => {
@@ -138,6 +142,7 @@ router.post('/update-status', auth, async (req, res) => {
 
     // If status is Delivered, also update the associated request
     if (status === 'Delivered') {
+<<<<<<< Updated upstream
       console.log('Delivery marked as Delivered, searching for associated request...');
       console.log('Donation details:', {
         donorId: donation.donorId,
@@ -155,11 +160,39 @@ router.post('/update-status', auth, async (req, res) => {
       if (request) {
         console.log('Updating request status to Completed');
         request.status = 'Completed';
+=======
+      // Find the associated request using the receiverId and foodType
+      const request = await Request.findOne({ 
+        requesterId: donation.receiverId,
+        foodType: donation.foodType,
+        status: { $in: ['Pending', 'Matched', 'In Progress'] }
+      });
+      
+      if (request) {
+        console.log('Found request to update:', request._id);
+        request.status = 'Completed';
+        request.donationId = donation._id;
+        request.donorId = donation.donorId;
+>>>>>>> Stashed changes
         await request.save();
         console.log('Request updated successfully');
       } else {
         console.log('No matching request found to update');
       }
+<<<<<<< Updated upstream
+=======
+
+      // Also update any associated transaction
+      const transaction = await Transaction.findOne({ 
+        donationId: donation._id,
+        status: 'In Progress'
+      });
+
+      if (transaction) {
+        transaction.status = 'Completed';
+        await transaction.save();
+      }
+>>>>>>> Stashed changes
     }
 
     // Emit socket event for real-time update

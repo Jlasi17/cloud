@@ -742,6 +742,7 @@ const DeliveryPartnerDashboard = () => {
       {/* Delivery Details Dialog - Only render if we have valid data */}
       {openDetails && selectedMatch && (
   <Dialog open={openDetails} onClose={handleCloseDetails} maxWidth="md" fullWidth>
+<<<<<<< Updated upstream
     <DialogTitle>Delivery Details</DialogTitle>
     <DialogContent>
       <Box>
@@ -751,10 +752,22 @@ const DeliveryPartnerDashboard = () => {
         <Grid container spacing={3}>
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle1" gutterBottom>Pickup Details</Typography>
+=======
+          <DialogTitle>Delivery Details</DialogTitle>
+          <DialogContent>
+            <Box>
+              <Typography variant="h6" gutterBottom>Order Summary</Typography>
+              <Divider sx={{ mb: 2 }} />
+              
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" gutterBottom>Pickup Details</Typography>
+>>>>>>> Stashed changes
             <Typography><strong>Donor:</strong> {selectedMatch.donorId?.name || 'N/A'}</Typography>
             <Typography><strong>Food Type:</strong> {selectedMatch.foodType || 'N/A'}</Typography>
             <Typography><strong>Quantity:</strong> {selectedMatch.quantity || 0} kg</Typography>
             <Typography><strong>Pickup Address:</strong> {selectedMatch.location || 'Not specified'}</Typography>
+<<<<<<< Updated upstream
             <Typography><strong>Pickup Time:</strong> {selectedMatch.createdAt ? new Date(selectedMatch.createdAt).toLocaleString() : 'N/A'}</Typography>
             
             {selectedMatch.coordinates?.lat && selectedMatch.coordinates?.lng && (
@@ -832,6 +845,85 @@ const DeliveryPartnerDashboard = () => {
                   allowFullScreen
                 />
               ) : (
+=======
+                  <Typography><strong>Pickup Time:</strong> {selectedMatch.createdAt ? new Date(selectedMatch.createdAt).toLocaleString() : 'N/A'}</Typography>
+                  
+            {selectedMatch.coordinates?.lat && selectedMatch.coordinates?.lng && (
+                    <Box mt={1}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<RoomIcon />}
+                        component="a"
+                  href={`https://www.google.com/maps?q=${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View on Map
+                      </Button>
+                    </Box>
+                  )}
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" gutterBottom>Delivery Details</Typography>
+            <Typography><strong>Recipient:</strong> {selectedMatch.receiverId?.name || 'N/A'}</Typography>
+                  <Typography><strong>Delivery Address:</strong> {selectedMatch.deliveryAddress || 'Not specified'}</Typography>
+                  <Box display="flex" alignItems="center" mt={1} mb={1}>
+                    <Typography><strong>Status:</strong></Typography>
+                    <Chip 
+                      label={selectedMatch.status || 'pending'} 
+                      size="small" 
+                      color={
+                  selectedMatch.status === 'Delivered' ? 'success' : 
+                  selectedMatch.status === 'Ready to Pick Up' ? 'warning' : 'primary'
+                      }
+                      sx={{ ml: 1, textTransform: 'capitalize' }}
+                    />
+                  </Box>
+                  <Typography><strong>Assigned At:</strong> {selectedMatch.updatedAt ? new Date(selectedMatch.updatedAt).toLocaleString() : 'N/A'}</Typography>
+                  
+            {selectedMatch.deliveryCoordinates?.lat && selectedMatch.deliveryCoordinates?.lng && (
+                    <Box mt={1}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<RoomIcon />}
+                        component="a"
+                  href={`https://www.google.com/maps?q=${selectedMatch.deliveryCoordinates.lat},${selectedMatch.deliveryCoordinates.lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View on Map
+                      </Button>
+                    </Box>
+                  )}
+                </Grid>
+              </Grid>
+              
+              <Box mt={3}>
+                <Typography variant="subtitle1" gutterBottom>Special Instructions</Typography>
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+            {selectedMatch.notes || 'No special instructions provided.'}
+                </Paper>
+              </Box>
+              
+              <Box mt={3}>
+                <Typography variant="subtitle1" gutterBottom>Delivery Route</Typography>
+          {selectedMatch.location && selectedMatch.receiverId?.location ? (
+            <Box sx={{ height: '300px', width: '100%', position: 'relative' }}>
+              {process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? (
+                  <iframe
+                    title="delivery-route"
+                    width="100%"
+                    height="300"
+                    frameBorder="0"
+                    style={{ border: '1px solid #ccc', borderRadius: '4px' }}
+                  src={`https://www.google.com/maps/embed/v1/directions?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY}&origin=${encodeURIComponent(selectedMatch.location)}&destination=${encodeURIComponent(selectedMatch.receiverId.location)}&mode=driving`}
+                  allowFullScreen
+                  />
+                ) : (
+>>>>>>> Stashed changes
                 <Alert severity="warning" sx={{ mt: 1 }}>
                   Google Maps API key is not configured. Please add REACT_APP_GOOGLE_MAPS_API_KEY to your environment variables.
                 </Alert>
@@ -860,6 +952,7 @@ const DeliveryPartnerDashboard = () => {
                   <OpenInNewIcon fontSize="small" sx={{ mr: 0.5 }} />
                   Open in Google Maps
                 </Link>
+<<<<<<< Updated upstream
               </Box>
             </Box>
           ) : selectedMatch.coordinates?.lat && selectedMatch.receiverCoordinates?.lat ? (
@@ -946,6 +1039,94 @@ const DeliveryPartnerDashboard = () => {
             startIcon={<RoomIcon />}
           >
             Get Directions
+=======
+              </Box>
+            </Box>
+          ) : selectedMatch.coordinates?.lat && selectedMatch.receiverCoordinates?.lat ? (
+            <Box sx={{ height: '300px', width: '100%', position: 'relative' }}>
+              {process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? (
+                <iframe
+                  title="delivery-route-coords"
+                  width="100%"
+                  height="300"
+                  frameBorder="0"
+                  style={{ border: '1px solid #ccc', borderRadius: '4px' }}
+                  src={`https://www.google.com/maps/embed/v1/directions?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY}&origin=${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}&destination=${selectedMatch.receiverCoordinates.lat},${selectedMatch.receiverCoordinates.lng}&mode=driving`}
+                  allowFullScreen
+                />
+              ) : (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  Google Maps API key is not configured. Please add REACT_APP_GOOGLE_MAPS_API_KEY to your environment variables.
+                </Alert>
+              )}
+              <Box sx={{ 
+                position: 'absolute', 
+                bottom: 8, 
+                right: 8, 
+                bgcolor: 'rgba(255,255,255,0.8)', 
+                p: 0.5, 
+                borderRadius: 1,
+                '&:hover': { bgcolor: 'rgba(255,255,255,1)' }
+              }}>
+                <Link
+                  href={`https://www.google.com/maps/dir/?api=1&origin=${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}&destination=${selectedMatch.receiverCoordinates.lat},${selectedMatch.receiverCoordinates.lng}&travelmode=driving`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    textDecoration: 'none',
+                    color: 'text.primary',
+                    fontSize: '0.75rem'
+                  }}
+                >
+                  <OpenInNewIcon fontSize="small" sx={{ mr: 0.5 }} />
+                  Open in Google Maps
+                </Link>
+              </Box>
+            </Box>
+          ) : (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              {!selectedMatch.location && !selectedMatch.receiverId?.location && !selectedMatch.coordinates?.lat && !selectedMatch.receiverCoordinates?.lat
+                ? "Both pickup and delivery locations are missing"
+                : !selectedMatch.location && !selectedMatch.coordinates?.lat
+                  ? "Pickup location is missing"
+                  : "Delivery location is missing"}
+            </Alert>
+          )}
+        </Box>
+        
+        <Box mt={3}>
+          <Typography variant="subtitle1" gutterBottom>Additional Information</Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={6} md={3}>
+              <Typography variant="body2"><strong>Estimated Value:</strong> ${selectedMatch.estimatedValue || 'N/A'}</Typography>
+            </Grid>
+            <Grid item xs={6} md={3}>
+              <Typography variant="body2"><strong>Market Cost:</strong> ${selectedMatch.marketCost || 'N/A'}</Typography>
+            </Grid>
+            <Grid item xs={6} md={3}>
+              <Typography variant="body2"><strong>Estimated Spoil Time:</strong> {selectedMatch.spoilTime ? new Date(selectedMatch.spoilTime).toLocaleString() : 'N/A'}</Typography>
+            </Grid>
+          </Grid>
+              </Box>
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleCloseDetails}>Close</Button>
+      {selectedMatch?.status !== 'Delivered' && (
+        <>
+              <Button 
+                variant="contained" 
+                color="primary"
+                component="a"
+            href={`https://www.google.com/maps/dir/?api=1&origin=${location?.coordinates?.[1] || ''},${location?.coordinates?.[0] || ''}&destination=${selectedMatch?.status === 'Picked Up' ? selectedMatch.deliveryCoordinates?.lat || selectedMatch.deliveryCoordinates?.lng ? `${selectedMatch.deliveryCoordinates.lat},${selectedMatch.deliveryCoordinates.lng}` : '' : selectedMatch.coordinates?.lat || selectedMatch.coordinates?.lng ? `${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}` : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                startIcon={<RoomIcon />}
+              >
+                Get Directions
+>>>>>>> Stashed changes
           </Button>
           {selectedMatch?.status === 'In Progress' && (
             <Button
@@ -956,9 +1137,18 @@ const DeliveryPartnerDashboard = () => {
               startIcon={<CheckCircleIcon />}
             >
               {processingResponse ? 'Processing...' : 'Mark as Delivered'}
+<<<<<<< Updated upstream
             </Button>
           )}
         </>
+=======
+              </Button>
+          )}
+        </>
+            )}
+          </DialogActions>
+        </Dialog>
+>>>>>>> Stashed changes
       )}
     </DialogActions>
   </Dialog>

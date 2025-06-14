@@ -80,6 +80,10 @@ app.use('/api/delivery', jwtMiddleware, deliveryRoutes);
 const billingRoutes = require('./routes/billing');
 app.use('/api/billing', jwtMiddleware, billingRoutes);
 
+// Payment routes
+const paymentRoutes = require('./routes/payments');
+app.use('/api/payments', jwtMiddleware, paymentRoutes);
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
