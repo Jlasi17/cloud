@@ -46,5 +46,6 @@ export const endpoints = {
     requestResponse: `${API_BASE_URL}/api/delivery/request-response`,
     pendingRequests: `${API_BASE_URL}/api/delivery/pending-requests`,
     updateStatus: `${API_BASE_URL}/api/delivery/update-status`,
+    matches: `${API_BASE_URL}/api/matches/delivery`,
   },
 };

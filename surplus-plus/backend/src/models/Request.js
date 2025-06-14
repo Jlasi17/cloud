@@ -42,6 +42,11 @@ const requestSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  donationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Donation',
+    default: null
+  },
   deliveryPartnerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -64,6 +69,7 @@ requestSchema.index({ requesterId: 1 });
 requestSchema.index({ coordinates: '2dsphere' }); // Enable geospatial queries
 requestSchema.index({ status: 1 });
 requestSchema.index({ createdAt: -1 });
+requestSchema.index({ donationId: 1 }); // Add index for donationId
 
 requestSchema.pre('save', function(next) {
   this.updatedAt = new Date();

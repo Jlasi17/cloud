@@ -18,7 +18,11 @@ const io = socketIO(server, {
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  connectTimeout: 10000,
+  allowEIO3: true
 });
 
 // Make io accessible to routes
@@ -76,22 +80,44 @@ app.use('/api/delivery', jwtMiddleware, deliveryRoutes);
 const billingRoutes = require('./routes/billing');
 app.use('/api/billing', jwtMiddleware, billingRoutes);
 
+// Payment routes
+const paymentRoutes = require('./routes/payments');
+app.use('/api/payments', jwtMiddleware, paymentRoutes);
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+  // Handle client errors
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('Client disconnected:', socket.id, 'Reason:', reason);
   });
 
   // Handle real-time notifications
   socket.on('new_match', (data) => {
-    io.emit('match_notification', data);
+    try {
+      io.emit('match_notification', data);
+    } catch (error) {
+      console.error('Error emitting match notification:', error);
+    }
   });
 
   socket.on('delivery_status_update', (data) => {
-    io.emit('delivery_update', data);
+    try {
+      io.emit('delivery_update', data);
+    } catch (error) {
+      console.error('Error emitting delivery update:', error);
+    }
   });
+});
+
+// Error handling for Socket.IO
+io.engine.on('connection_error', (err) => {
+  console.error('Socket.IO connection error:', err);
 });
 
 // MongoDB connection

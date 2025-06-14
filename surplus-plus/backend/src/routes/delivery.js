@@ -3,6 +3,8 @@ const router = express.Router();
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const Donation = require('../models/Donation');
+const Request = require('../models/Request');
+const Transaction = require('../models/Transaction');
 
 // Middleware to verify JWT token
 const auth = (req, res, next) => {
@@ -119,7 +121,9 @@ router.post('/update-status', auth, async (req, res) => {
       return res.status(400).json({ message: 'Donation ID and status are required' });
     }
 
-    const donation = await Donation.findById(donationId);
+    const donation = await Donation.findById(donationId)
+      .populate('donorId')
+      .populate('receiverId');
     if (!donation) {
       return res.status(404).json({ message: 'Donation not found' });
     }
@@ -132,6 +136,38 @@ router.post('/update-status', auth, async (req, res) => {
     // Update the status
     donation.status = status;
     await donation.save();
+
+    // If status is Delivered, also update the associated request
+    if (status === 'Delivered') {
+      // Find the associated request using the receiverId and foodType
+      const request = await Request.findOne({ 
+        requesterId: donation.receiverId,
+        foodType: donation.foodType,
+        status: { $in: ['Pending', 'Matched', 'In Progress'] }
+      });
+      
+      if (request) {
+        console.log('Found request to update:', request._id);
+        request.status = 'Completed';
+        request.donationId = donation._id;
+        request.donorId = donation.donorId;
+        await request.save();
+        console.log('Request updated successfully');
+      } else {
+        console.log('No matching request found to update');
+      }
+
+      // Also update any associated transaction
+      const transaction = await Transaction.findOne({ 
+        donationId: donation._id,
+        status: 'In Progress'
+      });
+
+      if (transaction) {
+        transaction.status = 'Completed';
+        await transaction.save();
+      }
+    }
 
     // Emit socket event for real-time update
     req.app.get('io').emit('delivery_status_update', {
@@ -159,7 +195,9 @@ router.post('/request-response', auth, async (req, res) => {
       return res.status(400).json({ message: 'Valid donation ID and response (accept/decline) are required' });
     }
 
-    const donation = await Donation.findById(donationId);
+    const donation = await Donation.findById(donationId)
+      .populate('donorId')
+      .populate('receiverId');
     if (!donation) {
       return res.status(404).json({ message: 'Donation not found' });
     }

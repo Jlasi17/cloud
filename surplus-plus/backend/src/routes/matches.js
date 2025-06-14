@@ -90,6 +90,7 @@ router.post('/create', async (req, res) => {
     // Update request status
     request.status = 'Matched';
     request.donationId = donationId;
+    request.donorId = donation.donorId;
     await request.save();
     
     // Emit socket event for real-time update
@@ -137,7 +138,7 @@ router.post('/status', async (req, res) => {
 });
 
 // Get delivery partner's matches and available deliveries
-router.get('/delivery', async (req, res) => {
+router.get('/delivery', auth, async (req, res) => {
   try {
     console.log('Fetching delivery matches and available deliveries');
     
@@ -145,7 +146,8 @@ router.get('/delivery', async (req, res) => {
     const matches = await Donation.find({
       $or: [
         { status: 'In Progress' },
-        { status: 'Paid' }
+        { status: 'Paid' },
+        { status: 'Ready to Pick Up' }
       ]
     })
     .populate('donorId', 'name location')
