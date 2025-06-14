@@ -35,6 +35,7 @@ import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import RoomIcon from '@mui/icons-material/Room';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useAuth } from '../context/AuthContext';
 import { axiosInstance } from '../utils/axios';
 import { endpoints, SOCKET_URL } from '../config/api';
@@ -69,7 +70,11 @@ const DeliveryPartnerDashboard = () => {
 
   const fetchMatches = useCallback(async () => {
     try {
-      const response = await axiosInstance.get(endpoints.matches.getDeliveryMatches);
+      const response = await axiosInstance.get(endpoints.delivery.matches, {
+        params: {
+          populate: 'donorId,receiverId' // or whatever your backend expects
+        }
+      });
       setAssignedDeliveries(response.data.assignedDeliveries || []);
       setAvailableDeliveries(response.data.availableDeliveries || []);
     } catch (error) {
@@ -179,9 +184,10 @@ const DeliveryPartnerDashboard = () => {
       // Create a safe match object with default values
       const safeMatch = {
         ...match,
-        donation: match.donation || {},
-        donor: match.donor || {},
-        requester: match.requester || {},
+        // If you need to populate donor/receiver info, you might need to fetch it here
+        // or ensure it's included in your initial data fetch
+        donorId: match.donorId || {},
+        receiverId: match.receiverId || {},
         _id: match._id
       };
       
@@ -189,7 +195,11 @@ const DeliveryPartnerDashboard = () => {
       setOpenDetails(true);
     } catch (error) {
       console.error('Error opening details:', error);
-      setLocationError(error.message || 'Failed to open delivery details. Please try again.');
+      setSnackbar({
+        open: true,
+        message: error.message || 'Failed to open delivery details. Please try again.',
+        severity: 'error'
+      });
     }
   }, []);
 
@@ -329,13 +339,15 @@ const DeliveryPartnerDashboard = () => {
         withCredentials: true,
         transports: ['websocket', 'polling'],
         reconnectionAttempts: 5,
-        reconnectionDelay: 1000
+        reconnectionDelay: 1000,
+        timeout: 10000, // Add timeout
+        forceNew: true // Force new connection
       });
 
       socketRef.current = socket;
 
       socket.on('connect', () => {
-        console.log('Connected to Socket.IO server');
+        console.log('Connected to Socket.IO server with ID:', socket.id);
         setSnackbar({
           open: true,
           message: 'Connected to real-time updates',
@@ -344,10 +356,36 @@ const DeliveryPartnerDashboard = () => {
       });
 
       socket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
+        console.error('Socket connection error:', error.message);
         setSnackbar({
           open: true,
-          message: 'Error connecting to real-time updates',
+          message: `Connection error: ${error.message}`,
+          severity: 'error'
+        });
+      });
+
+      socket.on('disconnect', (reason) => {
+        console.log('Socket disconnected:', reason);
+        if (reason === 'io server disconnect') {
+          // Server initiated disconnect, try to reconnect
+          socket.connect();
+        }
+        setSnackbar({
+          open: true,
+          message: `Disconnected: ${reason}`,
+          severity: 'warning'
+        });
+      });
+
+      socket.on('reconnect_attempt', (attemptNumber) => {
+        console.log('Reconnection attempt:', attemptNumber);
+      });
+
+      socket.on('reconnect_failed', () => {
+        console.error('Failed to reconnect to Socket.IO server');
+        setSnackbar({
+          open: true,
+          message: 'Failed to reconnect to real-time updates',
           severity: 'error'
         });
       });
@@ -381,6 +419,7 @@ const DeliveryPartnerDashboard = () => {
 
       return () => {
         if (socket) {
+          console.log('Cleaning up socket connection');
           socket.disconnect();
         }
       };
@@ -428,6 +467,51 @@ const DeliveryPartnerDashboard = () => {
         </Button>
       </Box>
     );
+  };
+
+  const handleMarkAsDelivered = async (donationId) => {
+    try {
+      setProcessingResponse(true);
+      
+      // Update donation status
+      const response = await axiosInstance.post(endpoints.delivery.updateStatus, {
+        donationId,
+        status: 'Delivered'
+      });
+
+      // Update the delivery in the assigned deliveries list
+      setAssignedDeliveries(prev => prev.map(delivery => {
+        if ((delivery._id === donationId) || (delivery.donationId === donationId)) {
+          return {
+            ...delivery,
+            status: 'Delivered'
+          };
+        }
+        return delivery;
+      }));
+
+      // Show success message
+      setSnackbar({
+        open: true,
+        message: 'Delivery marked as completed successfully',
+        severity: 'success'
+      });
+
+      // Close the details dialog
+      setOpenDetails(false);
+
+      // Refresh matches to ensure sync with server
+      await fetchMatches();
+    } catch (error) {
+      console.error('Error marking delivery as completed:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.message || 'Error marking delivery as completed',
+        severity: 'error'
+      });
+    } finally {
+      setProcessingResponse(false);
+    }
   };
 
   if (loading) {
@@ -657,127 +741,228 @@ const DeliveryPartnerDashboard = () => {
 
       {/* Delivery Details Dialog - Only render if we have valid data */}
       {openDetails && selectedMatch && (
-        <Dialog 
-          open={openDetails} 
-          onClose={handleCloseDetails} 
-          maxWidth="md" 
-          fullWidth
-        >
-          <DialogTitle>Delivery Details</DialogTitle>
-          <DialogContent>
-            {/* Safe access to properties with optional chaining */}
-            <Box>
-              <Typography variant="h6" gutterBottom>Order Summary</Typography>
-              <Divider sx={{ mb: 2 }} />
-              
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" gutterBottom>Pickup Details</Typography>
-                  <Typography><strong>Donor:</strong> {selectedMatch.donor?.name || 'N/A'}</Typography>
-                  <Typography><strong>Food Type:</strong> {selectedMatch.donation?.foodType || 'N/A'}</Typography>
-                  <Typography><strong>Quantity:</strong> {selectedMatch.donation?.quantity || 0} kg</Typography>
-                  <Typography><strong>Pickup Address:</strong> {selectedMatch.donation?.pickupAddress || 'Not specified'}</Typography>
-                  <Typography><strong>Pickup Time:</strong> {selectedMatch.createdAt ? new Date(selectedMatch.createdAt).toLocaleString() : 'N/A'}</Typography>
-                  
-                  {selectedMatch.donation?.pickupLat && selectedMatch.donation?.pickupLng && (
-                    <Box mt={1}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<RoomIcon />}
-                        component="a"
-                        href={`https://www.google.com/maps?q=${selectedMatch.donation.pickupLat},${selectedMatch.donation.pickupLng}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        View on Map
-                      </Button>
-                    </Box>
-                  )}
-                </Grid>
-                
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" gutterBottom>Delivery Details</Typography>
-                  <Typography><strong>Recipient:</strong> {selectedMatch.requester?.name || 'N/A'}</Typography>
-                  <Typography><strong>Delivery Address:</strong> {selectedMatch.deliveryAddress || 'Not specified'}</Typography>
-                  <Box display="flex" alignItems="center" mt={1} mb={1}>
-                    <Typography><strong>Status:</strong></Typography>
-                    <Chip 
-                      label={selectedMatch.status || 'pending'} 
-                      size="small" 
-                      color={
-                        selectedMatch.status === 'delivered' ? 'success' : 
-                        selectedMatch.status === 'picked' ? 'secondary' : 'primary'
-                      }
-                      sx={{ ml: 1, textTransform: 'capitalize' }}
-                    />
-                  </Box>
-                  <Typography><strong>Assigned At:</strong> {selectedMatch.updatedAt ? new Date(selectedMatch.updatedAt).toLocaleString() : 'N/A'}</Typography>
-                  
-                  {selectedMatch.deliveryLat && selectedMatch.deliveryLng && (
-                    <Box mt={1}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<RoomIcon />}
-                        component="a"
-                        href={`https://www.google.com/maps?q=${selectedMatch.deliveryLat},${selectedMatch.deliveryLng}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        View on Map
-                      </Button>
-                    </Box>
-                  )}
-                </Grid>
-              </Grid>
-              
-              <Box mt={3}>
-                <Typography variant="subtitle1" gutterBottom>Special Instructions</Typography>
-                <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
-                  {selectedMatch.donation?.notes || 'No special instructions provided.'}
-                </Paper>
+  <Dialog open={openDetails} onClose={handleCloseDetails} maxWidth="md" fullWidth>
+    <DialogTitle>Delivery Details</DialogTitle>
+    <DialogContent>
+      <Box>
+        <Typography variant="h6" gutterBottom>Order Summary</Typography>
+        <Divider sx={{ mb: 2 }} />
+        
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle1" gutterBottom>Pickup Details</Typography>
+            <Typography><strong>Donor:</strong> {selectedMatch.donorId?.name || 'N/A'}</Typography>
+            <Typography><strong>Food Type:</strong> {selectedMatch.foodType || 'N/A'}</Typography>
+            <Typography><strong>Quantity:</strong> {selectedMatch.quantity || 0} kg</Typography>
+            <Typography><strong>Pickup Address:</strong> {selectedMatch.location || 'Not specified'}</Typography>
+            <Typography><strong>Pickup Time:</strong> {selectedMatch.createdAt ? new Date(selectedMatch.createdAt).toLocaleString() : 'N/A'}</Typography>
+            
+            {selectedMatch.coordinates?.lat && selectedMatch.coordinates?.lng && (
+              <Box mt={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RoomIcon />}
+                  component="a"
+                  href={`https://www.google.com/maps?q=${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View on Map
+                </Button>
               </Box>
-              
-              <Box mt={3}>
-                <Typography variant="subtitle1" gutterBottom>Delivery Route</Typography>
-                {selectedMatch.donation?.pickupLat && selectedMatch.donation?.pickupLng && 
-                selectedMatch.deliveryLat && selectedMatch.deliveryLng ? (
-                  <iframe
-                    title="delivery-route"
-                    width="100%"
-                    height="300"
-                    frameBorder="0"
-                    scrolling="no"
-                    marginHeight="0"
-                    marginWidth="0"
-                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${Math.min(selectedMatch.donation.pickupLng, selectedMatch.deliveryLng) - 0.05}%2C${Math.min(selectedMatch.donation.pickupLat, selectedMatch.deliveryLat) - 0.05}%2C${Math.max(selectedMatch.donation.pickupLng, selectedMatch.deliveryLng) + 0.05}%2C${Math.max(selectedMatch.donation.pickupLat, selectedMatch.deliveryLat) + 0.05}&amp;layer=mapnik&marker=${selectedMatch.donation.pickupLat}%2C${selectedMatch.donation.pickupLng}&marker=${selectedMatch.deliveryLat}%2C${selectedMatch.deliveryLng}`}
-                    style={{ border: '1px solid #ccc', borderRadius: '4px' }}
-                  />
-                ) : (
-                  <Typography color="text.secondary">Location data not available for route mapping.</Typography>
-                )}
+            )}
+          </Grid>
+          
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle1" gutterBottom>Delivery Details</Typography>
+            <Typography><strong>Recipient:</strong> {selectedMatch.receiverId?.name || 'N/A'}</Typography>
+            <Typography><strong>Delivery Address:</strong> {selectedMatch.deliveryAddress || 'Not specified'}</Typography>
+            <Box display="flex" alignItems="center" mt={1} mb={1}>
+              <Typography><strong>Status:</strong></Typography>
+              <Chip 
+                label={selectedMatch.status || 'pending'} 
+                size="small" 
+                color={
+                  selectedMatch.status === 'Delivered' ? 'success' : 
+                  selectedMatch.status === 'Ready to Pick Up' ? 'warning' : 'primary'
+                }
+                sx={{ ml: 1, textTransform: 'capitalize' }}
+              />
+            </Box>
+            <Typography><strong>Assigned At:</strong> {selectedMatch.updatedAt ? new Date(selectedMatch.updatedAt).toLocaleString() : 'N/A'}</Typography>
+            
+            {selectedMatch.deliveryCoordinates?.lat && selectedMatch.deliveryCoordinates?.lng && (
+              <Box mt={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RoomIcon />}
+                  component="a"
+                  href={`https://www.google.com/maps?q=${selectedMatch.deliveryCoordinates.lat},${selectedMatch.deliveryCoordinates.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View on Map
+                </Button>
+              </Box>
+            )}
+          </Grid>
+        </Grid>
+        
+        <Box mt={3}>
+          <Typography variant="subtitle1" gutterBottom>Special Instructions</Typography>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+            {selectedMatch.notes || 'No special instructions provided.'}
+          </Paper>
+        </Box>
+        
+        <Box mt={3}>
+          <Typography variant="subtitle1" gutterBottom>Delivery Route</Typography>
+          {selectedMatch.location && selectedMatch.receiverId?.location ? (
+            <Box sx={{ height: '300px', width: '100%', position: 'relative' }}>
+              {process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? (
+                <iframe
+                  title="delivery-route"
+                  width="100%"
+                  height="300"
+                  frameBorder="0"
+                  style={{ border: '1px solid #ccc', borderRadius: '4px' }}
+                  src={`https://www.google.com/maps/embed/v1/directions?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY}&origin=${encodeURIComponent(selectedMatch.location)}&destination=${encodeURIComponent(selectedMatch.receiverId.location)}&mode=driving`}
+                  allowFullScreen
+                />
+              ) : (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  Google Maps API key is not configured. Please add REACT_APP_GOOGLE_MAPS_API_KEY to your environment variables.
+                </Alert>
+              )}
+              <Box sx={{ 
+                position: 'absolute', 
+                bottom: 8, 
+                right: 8, 
+                bgcolor: 'rgba(255,255,255,0.8)', 
+                p: 0.5, 
+                borderRadius: 1,
+                '&:hover': { bgcolor: 'rgba(255,255,255,1)' }
+              }}>
+                <Link
+                  href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(selectedMatch.location)}&destination=${encodeURIComponent(selectedMatch.receiverId.location)}&travelmode=driving`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    textDecoration: 'none',
+                    color: 'text.primary',
+                    fontSize: '0.75rem'
+                  }}
+                >
+                  <OpenInNewIcon fontSize="small" sx={{ mr: 0.5 }} />
+                  Open in Google Maps
+                </Link>
               </Box>
             </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseDetails}>Close</Button>
-            {selectedMatch?.status !== 'delivered' && (
-              <Button 
-                variant="contained" 
-                color="primary"
-                component="a"
-                href={`https://www.google.com/maps/dir/?api=1&origin=${location?.coordinates?.[1] || ''},${location?.coordinates?.[0] || ''}&destination=${selectedMatch?.status === 'picked' ? selectedMatch.deliveryLat || selectedMatch.deliveryLng ? `${selectedMatch.deliveryLat},${selectedMatch.deliveryLng}` : '' : selectedMatch.donation?.pickupLat || selectedMatch.donation?.pickupLng ? `${selectedMatch.donation.pickupLat},${selectedMatch.donation.pickupLng}` : ''}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                startIcon={<RoomIcon />}
-              >
-                Get Directions
-              </Button>
-            )}
-          </DialogActions>
-        </Dialog>
+          ) : selectedMatch.coordinates?.lat && selectedMatch.receiverCoordinates?.lat ? (
+            <Box sx={{ height: '300px', width: '100%', position: 'relative' }}>
+              {process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? (
+                <iframe
+                  title="delivery-route-coords"
+                  width="100%"
+                  height="300"
+                  frameBorder="0"
+                  style={{ border: '1px solid #ccc', borderRadius: '4px' }}
+                  src={`https://www.google.com/maps/embed/v1/directions?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY}&origin=${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}&destination=${selectedMatch.receiverCoordinates.lat},${selectedMatch.receiverCoordinates.lng}&mode=driving`}
+                  allowFullScreen
+                />
+              ) : (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  Google Maps API key is not configured. Please add REACT_APP_GOOGLE_MAPS_API_KEY to your environment variables.
+                </Alert>
+              )}
+              <Box sx={{ 
+                position: 'absolute', 
+                bottom: 8, 
+                right: 8, 
+                bgcolor: 'rgba(255,255,255,0.8)', 
+                p: 0.5, 
+                borderRadius: 1,
+                '&:hover': { bgcolor: 'rgba(255,255,255,1)' }
+              }}>
+                <Link
+                  href={`https://www.google.com/maps/dir/?api=1&origin=${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}&destination=${selectedMatch.receiverCoordinates.lat},${selectedMatch.receiverCoordinates.lng}&travelmode=driving`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    textDecoration: 'none',
+                    color: 'text.primary',
+                    fontSize: '0.75rem'
+                  }}
+                >
+                  <OpenInNewIcon fontSize="small" sx={{ mr: 0.5 }} />
+                  Open in Google Maps
+                </Link>
+              </Box>
+            </Box>
+          ) : (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              {!selectedMatch.location && !selectedMatch.receiverId?.location && !selectedMatch.coordinates?.lat && !selectedMatch.receiverCoordinates?.lat
+                ? "Both pickup and delivery locations are missing"
+                : !selectedMatch.location && !selectedMatch.coordinates?.lat
+                  ? "Pickup location is missing"
+                  : "Delivery location is missing"}
+            </Alert>
+          )}
+        </Box>
+        
+        <Box mt={3}>
+          <Typography variant="subtitle1" gutterBottom>Additional Information</Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={6} md={3}>
+              <Typography variant="body2"><strong>Estimated Value:</strong> ${selectedMatch.estimatedValue || 'N/A'}</Typography>
+            </Grid>
+            <Grid item xs={6} md={3}>
+              <Typography variant="body2"><strong>Market Cost:</strong> ${selectedMatch.marketCost || 'N/A'}</Typography>
+            </Grid>
+            <Grid item xs={6} md={3}>
+              <Typography variant="body2"><strong>Estimated Spoil Time:</strong> {selectedMatch.spoilTime ? new Date(selectedMatch.spoilTime).toLocaleString() : 'N/A'}</Typography>
+            </Grid>
+          </Grid>
+        </Box>
+      </Box>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={handleCloseDetails}>Close</Button>
+      {selectedMatch?.status !== 'Delivered' && (
+        <>
+          <Button 
+            variant="contained" 
+            color="primary"
+            component="a"
+            href={`https://www.google.com/maps/dir/?api=1&origin=${location?.coordinates?.[1] || ''},${location?.coordinates?.[0] || ''}&destination=${selectedMatch?.status === 'Picked Up' ? selectedMatch.deliveryCoordinates?.lat || selectedMatch.deliveryCoordinates?.lng ? `${selectedMatch.deliveryCoordinates.lat},${selectedMatch.deliveryCoordinates.lng}` : '' : selectedMatch.coordinates?.lat || selectedMatch.coordinates?.lng ? `${selectedMatch.coordinates.lat},${selectedMatch.coordinates.lng}` : ''}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            startIcon={<RoomIcon />}
+          >
+            Get Directions
+          </Button>
+          {selectedMatch?.status === 'In Progress' && (
+            <Button
+              variant="contained"
+              color="success"
+              onClick={() => handleMarkAsDelivered(selectedMatch._id)}
+              disabled={processingResponse}
+              startIcon={<CheckCircleIcon />}
+            >
+              {processingResponse ? 'Processing...' : 'Mark as Delivered'}
+            </Button>
+          )}
+        </>
       )}
+    </DialogActions>
+  </Dialog>
+)}
 
       {/* Notification Dialog */}
       <Dialog
